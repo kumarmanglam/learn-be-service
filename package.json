@@ -1,0 +1,17 @@
+{
+  "name": "be-service",
+  "version": "1.0.0",
+  "description": "Java code execution service (javac + java) for aws-learn-app. Deploys on Render free tier via Docker.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}

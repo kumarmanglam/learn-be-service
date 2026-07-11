@@ -1,0 +1,14 @@
+# Render Blueprint — free Docker web service that compiles & runs Java.
+# Create the service from this file (or connect the repo and pick Docker/Free).
+# Set RUN_JAVA_SECRET in the Render dashboard to the SAME value the Next.js
+# app sends via `x-run-secret` (never commit the secret).
+services:
+  - type: web
+    name: be-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: RUN_JAVA_SECRET
+        sync: false
