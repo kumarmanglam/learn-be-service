@@ -29,8 +29,10 @@ const MAX_CODE_LEN = 20000;
 // Render free tier is 0.1 CPU: `javac` (itself a JVM) is very slow when cold,
 // so the first compile after a spin-up can take 15s+. Generous timeouts avoid
 // false "compilation timed out" errors; they still catch genuine infinite work.
-const COMPILE_TIMEOUT_MS = 30000;
-const RUN_TIMEOUT_MS = 10000;
+// These are sized to sit within the caller's ceiling (Vercel Hobby caps the
+// proxy function at 60s): compile 32s + run 24s leaves headroom for network.
+const COMPILE_TIMEOUT_MS = 32000;
+const RUN_TIMEOUT_MS = 24000;
 const MAX_STDOUT = 10000;
 const MAX_STDERR = 5000;
 
