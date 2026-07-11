@@ -26,10 +26,19 @@ const RUN_SECRET = process.env.RUN_JAVA_SECRET || "";
 
 // Limits (defense-in-depth on a tiny shared box).
 const MAX_CODE_LEN = 20000;
-const COMPILE_TIMEOUT_MS = 8000;
-const RUN_TIMEOUT_MS = 5000;
+// Render free tier is 0.1 CPU: `javac` (itself a JVM) is very slow when cold,
+// so the first compile after a spin-up can take 15s+. Generous timeouts avoid
+// false "compilation timed out" errors; they still catch genuine infinite work.
+const COMPILE_TIMEOUT_MS = 30000;
+const RUN_TIMEOUT_MS = 10000;
 const MAX_STDOUT = 10000;
 const MAX_STDERR = 5000;
+
+// JVM warm-up state. Priming javac/java once (disk cache + class loading) makes
+// the first real /run dramatically faster on the free tier. "cold" | "warming"
+// | "warm". Triggered on startup and by /health (which the app's wake button
+// pings), so clicking "Wake Java backend" also warms the compiler.
+let warmState = "cold";
 
 const app = express();
 app.use(cors());
@@ -49,9 +58,17 @@ function rateLimited(ip, now) {
   return arr.length > RATE_MAX;
 }
 
-// ---- Health check (used by Render + optional external pinger) ----
+// ---- Health check (used by Render + the app's wake button + pingers) ----
+// Also kicks off a JVM warm-up in the background so waking the service primes
+// the compiler, not just the Node process.
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "be-service", uptime: process.uptime() });
+  warmUp();
+  res.json({
+    ok: true,
+    service: "be-service",
+    uptime: process.uptime(),
+    warmState,
+  });
 });
 
 // ---- Spawn a process with a hard timeout; capture + cap output ----
@@ -94,6 +111,35 @@ function runProcess(cmd, args, opts, timeoutMs) {
     });
     child.on("close", (code) => finish(code));
   });
+}
+
+// ---- Prime javac/java once so the first real /run isn't a cold compile ----
+async function warmUp() {
+  if (warmState !== "cold") return;
+  warmState = "warming";
+  const dir = path.join(os.tmpdir(), `warm-${crypto.randomUUID()}`);
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, "Main.java"),
+      "public class Main { public static void main(String[] a) {} }",
+      "utf8"
+    );
+    const c = await runProcess("javac", ["Main.java"], { cwd: dir }, 60000);
+    if (c.exitCode === 0) {
+      await runProcess("java", ["-Xmx128m", "Main"], { cwd: dir }, 30000);
+      warmState = "warm";
+      console.log("warmup complete");
+    } else {
+      warmState = "cold";
+      console.log("warmup javac failed", c.stderr);
+    }
+  } catch (e) {
+    warmState = "cold";
+    console.log("warmup error", (e && e.message) || e);
+  } finally {
+    fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 // ---- POST /run — compile then execute a Java snippet ----
@@ -177,4 +223,6 @@ app.post("/run", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`be-service listening on :${PORT}`);
+  // Prime the JVM in the background so the first request is fast.
+  warmUp();
 });
